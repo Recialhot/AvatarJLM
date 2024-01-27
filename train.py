@@ -108,4 +108,6 @@ if __name__ == '__main__':
     parser.add_argument('--protocol', type=str, choices=['1', '2', '3'], required=True, help='Protocol.')
     args = parser.parse_args()
     opt = option.parse(args.opt, args, is_train=True)
+    print(torch.cuda.device_count())
+    print(torch.cuda.current_device())
     main(opt)

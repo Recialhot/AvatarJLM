@@ -251,7 +251,7 @@ def process(src, dst, body_models, split_file=None):
         input_rotation_velocity_global_6d = rotation_velocity_global_6d[:,:22,:]
         position_global_full_gt_world = body_pose_world.Jtr[:,:22,:] # position of joints relative to the world origin
 
-        offset_floor_height, contacts, discard_seq = determine_floor_height_and_contacts(position_global_full_gt_world, 60)
+        offset_floor_height, contacts, discard_seq = determine_floor_height_and_contacts(position_global_full_gt_world, 30)
 
         position_head_world = position_global_full_gt_world[:,15,:] # world position of head
         head_global_trans = torch.eye(4).repeat(position_head_world.shape[0],1,1)

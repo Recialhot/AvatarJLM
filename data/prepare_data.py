@@ -9,8 +9,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--root', type=str, required=True, help='Path to data root.')
     parser.add_argument('--protocol', type=int, default=1, choices=[1, 2, 3], help='Prepare data mode.')
-    parser.add_argument('--support_data', type=str, default='./support_data', help='Path to support data.')
-    parser.add_argument('--data_split', type=str, default='./data/data_split', help='Path to data split.')
+    parser.add_argument('--support_data', type=str, default='../support_data', help='Path to support data.')
+    parser.add_argument('--data_split', type=str, default='data_split/', help='Path to data split.')
     cfg = parser.parse_args()
 
     bm_fname_male = os.path.join(cfg.support_data, 'body_models/smplh/{}/model.npz'.format('male'))

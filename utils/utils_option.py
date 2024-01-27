@@ -38,16 +38,17 @@ def parse(opt_path, args=None, is_train=True):
 
     # ----------------------------------------
     # Update opt according to the args of AvatarJLM
+    # ysq
     # ----------------------------------------
     if args is not None:
-        
+
         print(f'[INFO] Update config {args.__dict__}.')
 
         if 'task' in args.__dict__:
             opt['task'] = args.task
 
         if 'protocol' in args.__dict__ and args.protocol is not None:
-            if args.protocol != 'real':
+            if args.protocol in ['1', '2', '3']:
                 opt['datasets']['train']['dataset_type'] = 'amass_p' + args.protocol
                 opt['datasets']['test']['dataset_type'] = 'amass_p' + args.protocol
                 if args.protocol in ['1', '2']:
@@ -56,10 +57,13 @@ def parse(opt_path, args=None, is_train=True):
                 else:
                     opt['datasets']['train']['dataroot'] = "./data/protocol_3"
                     opt['datasets']['test']['dataroot'] = "./data/protocol_3"
+            elif args.protocol == 'odt':
+                opt['datasets']['test']['dataset_type'] = "odt"
+                opt['datasets']['test']['dataroot'] = "./data/odt_data"
+
             else:
                 opt['datasets']['test']['dataset_type'] = "tracking"
                 opt['datasets']['test']['dataroot'] = "./data/real_captured_data"
-
 
         if 'checkpoint' in args.__dict__:
             opt['path']['pretrained'] = args.checkpoint
@@ -117,9 +121,9 @@ def parse(opt_path, args=None, is_train=True):
     # ----------------------------------------
     # GPU devices
     # ----------------------------------------
-    # gpu_list = ','.join(str(x) for x in opt['gpu_ids'])
-    # os.environ['CUDA_VISIBLE_DEVICES'] = gpu_list
-    # print('export CUDA_VISIBLE_DEVICES=' + gpu_list)
+    gpu_list = ','.join(str(x) for x in opt['gpu_ids'])
+    os.environ['CUDA_VISIBLE_DEVICES'] = gpu_list
+    print('export CUDA_VISIBLE_DEVICES=' + gpu_list)
 
     # ----------------------------------------
     # default setting for distributeddataparallel

@@ -101,11 +101,14 @@ class ModelBase():
         """
         network = network.to(self.device)
         if self.opt['dist']:
+            print("xx1")
             find_unused_parameters = self.opt['find_unused_parameters']
             network = DistributedDataParallel(network, device_ids=[torch.cuda.current_device()], find_unused_parameters=find_unused_parameters)
         else:
 #            pass
-            network = DataParallel(network)
+            print("xx2")
+            #ysq
+            # network = DataParallel(network,device_ids=[0,1,2,3])
         return network
 
     # ----------------------------------------

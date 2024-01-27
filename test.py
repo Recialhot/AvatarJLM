@@ -31,7 +31,7 @@ def evaluate(opt, logger, model, test_loader, epoch=0, save_animation=False):
 
         # vis
         if save_animation:
-            if index in [0, 10, 20]:
+            if index in [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]:
                 print(f'[INFO] Saving animation of sequence-{index}...')
                 video_dir = os.path.join(opt['path']['images'], str(index))
                 if not os.path.exists(video_dir):
@@ -85,6 +85,11 @@ def evaluate(opt, logger, model, test_loader, epoch=0, save_animation=False):
         # local hands position error
         pos_error_hands_ = torch.mean(torch.sqrt(torch.sum(torch.square(gt_position-predicted_position),axis=-1))[...,[20,21]]) * 100
         error_dict['H-PE'].append(pos_error_hands_)
+
+        # local feet position error
+        pos_error_feet_ = torch.mean(
+            torch.sqrt(torch.sum(torch.square(gt_position - predicted_position), axis=-1))[..., [7, 8]]) * 100
+        error_dict['F-PE'].append(pos_error_feet_)
 
         # upper joints error
         upper_joint_index = [0, 3, 6, 9, 13, 14, 12, 15, 16, 17, 18, 19, 20, 21]

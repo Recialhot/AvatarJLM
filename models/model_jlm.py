@@ -22,7 +22,12 @@ class ModelAvatarJLM(ModelBase):
         if self.opt_train['E_decay'] > 0:
             self.netE = define_G(opt).to(self.device).eval()
         self.window_size = self.opt['netG']['window_size']
-        self.bm = self.netG.module.body_model
+        #ysq
+        # 检查是否有 module 属性，然后访问模型的其他部分
+        if hasattr(self.netG, 'module'):
+            self.bm = self.netG.module.body_model
+        else:
+            self.bm = self.netG.body_model
 
 
     """
@@ -158,7 +163,62 @@ class ModelAvatarJLM(ModelBase):
             self.gt_body_param_list = data['body_param_list']
             for k,v in self.gt_body_param_list.items():
                 self.gt_body_param_list[k] = v.squeeze().to(self.device)
-        
+
+    # ----------------------------------------
+    # ysq
+    # feed odt test data
+    # ----------------------------------------
+    def feed_odt_test_data(self, data):
+        # (batch, window_size, 54=18+18+9+9)
+        self.input_signal = data['input_signal'].to(self.device)
+        print("self.input_signal shape:", self.input_signal.shape)
+        batch, seq_len = self.input_signal.shape[0], self.input_signal.shape[1]
+        rotation = self.input_signal[:, :, :22 * 6].reshape(batch, seq_len, 22, 6)
+        # rotation[:, :, 7], rotation[:, :, 10] = rotation[:, :, 10], rotation[:, :, 7]
+        # rotation[:, :, 8], rotation[:, :, 11] = rotation[:, :, 11], rotation[:, :, 8]
+        velocity_rotation = self.input_signal[:, :, 22 * 6:22 * 6 * 2].reshape(batch, seq_len, 22, 6)
+        # velocity_rotation[:, :, 7], velocity_rotation[:, :, 10] = velocity_rotation[:, :, 10], velocity_rotation[:, :, 7]
+        # velocity_rotation[:, :, 8], velocity_rotation[:, :, 11] = velocity_rotation[:, :, 11], velocity_rotation[:, :, 8]
+        position = self.input_signal[:, :, 22 * 6 * 2:22 * 6 * 2 + 3 * 22].reshape(batch, seq_len, 22, 3)
+        # position[:, :, 7], position[:, :, 10] = position[:, :, 10], position[:, :, 7]
+        # position[:, :, 8], position[:, :, 11] = position[:, :, 11], position[:, :, 8]
+        velocity_position = self.input_signal[:, :, 22 * 6 * 2 + 3 * 22:].reshape(batch, seq_len, 22, 3)
+        # velocity_position[:, :, 7], velocity_position[:, :, 10] = velocity_position[:, :, 10], velocity_position[:, :, 7]
+        # velocity_position[:, :, 8], velocity_position[:, :, 11] = velocity_position[:, :, 11], velocity_position[:, :, 8]
+        self.input_signal = torch.cat((rotation, velocity_rotation, position, velocity_position), dim=3)
+
+        # testing only
+        self.gt_global_head_trans = data['global_head_trans'].to(self.device)
+
+
+    def feed_data(self, data, test=False):
+        # (batch, window_size, 54=18+18+9+9)
+        self.input_signal = data['input_signal'].to(self.device)
+        batch, seq_len = self.input_signal.shape[0], self.input_signal.shape[1]
+        rotation = self.input_signal[:, :, :22*6].reshape(batch, seq_len, 22, 6)
+        velocity_rotation = self.input_signal[:, :, 22*6:22*6*2].reshape(batch, seq_len, 22, 6)
+        position = self.input_signal[:, :, 22*6*2:22*6*2+3*22].reshape(batch, seq_len, 22, 3)
+        velocity_position = self.input_signal[:, :, 22*6*2+3*22:].reshape(batch, seq_len, 22, 3)
+        self.input_signal = torch.cat((rotation, velocity_rotation, position, velocity_position), dim=3)
+
+
+        # --------------------------------------
+        self.gt_floor_height = data['floor_height'].to(self.device)
+        self.gt_global_orientation = data['rotation_local_full'][:, :, :6].to(self.device)
+        self.gt_joint_rotation = data['rotation_local_full'][:, :, 6:].to(self.device)
+        self.gt_joint_position = fk_module(self.gt_global_orientation.reshape(batch * seq_len, -1), self.gt_joint_rotation.reshape(batch * seq_len, -1), self.bm).reshape(batch, seq_len, -1)
+
+        # training only
+        if not test:
+            self.gt_floor_contact = data['foot_contact'].to(self.device)
+            self.gt_global_root_trans = data['pos_pelvis_gt'].to(self.device)
+
+        # testing only
+        if test:
+            self.gt_global_head_trans = data['global_head_trans'].to(self.device)
+            self.gt_body_param_list = data['body_param_list']
+            for k,v in self.gt_body_param_list.items():
+                self.gt_body_param_list[k] = v.squeeze().to(self.device)
         
     # ----------------------------------------
     # feed L to netG
@@ -234,6 +294,14 @@ class ModelAvatarJLM(ModelBase):
             hand_alignment_loss = self.G_lossfn(self.predictions['pred_global_position'][i].reshape(batch, seq_len, 22, 3)[:, :, [20, 21]], gt_global_position[:, :, [20, 21]]) * hand_alignment_loss_scale
             loss += hand_alignment_loss
             self.log_dict[f'hand_alignment_loss_{i}'] = hand_alignment_loss.item()
+
+            # absolute only foot
+            foot_alignment_loss_scale = 5
+            foot_alignment_loss = self.G_lossfn(
+                self.predictions['pred_global_position'][i].reshape(batch, seq_len, 22, 3)[:, :, [7, 8]],
+                gt_global_position[:, :, [7, 8]]) * foot_alignment_loss_scale
+            loss += foot_alignment_loss
+            self.log_dict[f'foot_alignment_loss_{i}'] = foot_alignment_loss.item()
 
 
         for i, init_pose in enumerate(self.predictions['pred_init_pose']):
@@ -335,6 +403,95 @@ class ModelAvatarJLM(ModelBase):
         self.gt_global_translation = self.gt_body_param_list['trans']
         self.gt_global_orientation = self.gt_body_param_list['root_orient']
 
+
+        self.netG.train()
+
+    # ----------------------------------------
+    # ysq
+    # test odt data
+    # ----------------------------------------
+    def test_odt(self):
+        self.netG.eval()
+        self.input_signal = self.input_signal.squeeze()
+        self.gt_global_head_trans = self.gt_global_head_trans.squeeze()
+        window_size = self.opt['datasets']['test']['window_size']
+        print("self.input_signal", self.input_signal.shape)
+
+        # position = self.input_signal[200, :, 12:12+3]
+        #
+        # print("position")
+        # for i in range(22):
+        #     print(i, position[i])
+
+        with torch.no_grad():
+            if self.input_signal.shape[0] <= window_size:
+                pred_global_orientation_list = []
+                pred_joint_rotation_list = []
+                for frame_idx in range(0, self.input_signal.shape[0]):
+                    outputs = self.netG(self.input_signal[0:frame_idx + 1].unsqueeze(0))
+                    pred_global_orientation, pred_joint_rotation = outputs['pred_global_orientation'][-1][:, -1], \
+                        outputs['pred_joint_rotation'][-1][:, -1]
+                    pred_global_orientation_list.append(pred_global_orientation)
+                    pred_joint_rotation_list.append(pred_joint_rotation)
+                pred_global_orientation_tensor = torch.cat(pred_global_orientation_list, dim=0)
+                pred_joint_rotation_tensor = torch.cat(pred_joint_rotation_list, dim=0)
+            else:
+                input_list_2 = []
+                pred_global_orientation_list_1 = []
+                pred_joint_rotation_list_1 = []
+                # input with the frame number less than the window size
+                for frame_idx in range(0, window_size):
+                    outputs = self.netG(self.input_signal[0:frame_idx + 1].unsqueeze(0))
+                    pred_global_orientation, pred_joint_rotation = outputs['pred_global_orientation'][-1][:, -1], \
+                        outputs['pred_joint_rotation'][-1][:, -1]
+                    pred_global_orientation_list_1.append(pred_global_orientation)
+                    pred_joint_rotation_list_1.append(pred_joint_rotation)
+                pred_global_orientation_1 = torch.cat(pred_global_orientation_list_1, dim=0)
+                pred_joint_rotation_1 = torch.cat(pred_joint_rotation_list_1, dim=0)
+
+                for frame_idx in range(window_size, self.input_signal.shape[0]):
+                    input_list_2.append(self.input_signal[frame_idx - window_size + 1:frame_idx + 1, ...].unsqueeze(0))
+                input_tensor_2 = torch.cat(input_list_2, dim=0)
+
+                # divide into many parts to reduce memory
+                part_size = 30
+                part_num = (input_tensor_2.shape[0] - 1) // part_size + 1
+                pred_global_orientation_list = [pred_global_orientation_1]
+                pred_joint_rotation_list = [pred_joint_rotation_1]
+                for part_idx in range(part_num):
+                    outputs = self.netG(
+                        input_tensor_2[part_size * part_idx:min(part_size * (part_idx + 1), input_tensor_2.shape[0])])
+                    pred_global_orientation_this_part, pred_joint_rotation_this_part = \
+                        outputs['pred_global_orientation'][-1][:, -1], outputs['pred_joint_rotation'][-1][:, -1]
+                    pred_global_orientation_list.append(pred_global_orientation_this_part)
+                    pred_joint_rotation_list.append(pred_joint_rotation_this_part)
+                pred_global_orientation_tensor = torch.cat(pred_global_orientation_list, dim=0)
+                pred_joint_rotation_tensor = torch.cat(pred_joint_rotation_list, dim=0)
+        print("pred_global_orientation_tensor", pred_global_orientation_tensor.shape)
+        print("pred_joint_rotation_tensor", pred_joint_rotation_tensor.shape)
+        self.pred_global_orientation = pred_global_orientation_tensor
+        self.pred_joint_rotation = pred_joint_rotation_tensor
+        self.pred = torch.cat([pred_global_orientation_tensor, pred_joint_rotation_tensor], dim=-1).to(self.device)
+        print("self.pred", self.pred.shape)
+        predicted_angle = utils_transform.sixd2aa(self.pred[:, :132].reshape(-1, 6).detach()).reshape(
+            self.pred[:, :132].shape[0], -1).float()
+        print("predicted_angle", predicted_angle.shape)
+
+        # Calculate global translation
+        T_head2world = self.gt_global_head_trans.clone()
+        t_head2world = T_head2world[:, :3, 3].clone()
+        body_pose_local = self.bm(**{'pose_body': predicted_angle[..., 3:66], 'root_orient': predicted_angle[..., :3]})
+        position_global_full_local = body_pose_local.Jtr[:, :22, :]
+        t_head2root = position_global_full_local[:, 15, :]
+        t_root2world = -t_head2root + t_head2world.cuda()
+
+        self.predicted_body = self.bm(
+            **{'pose_body': predicted_angle[..., 3:66], 'root_orient': predicted_angle[..., :3], 'trans': t_root2world})
+        self.predicted_vertex = self.predicted_body.v
+        self.predicted_position = self.predicted_body.Jtr[:, :22, :]
+
+        self.predicted_angle = predicted_angle
+        self.predicted_translation = t_root2world
 
         self.netG.train()
 
